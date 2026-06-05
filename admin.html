@@ -1,0 +1,725 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>Dulce Luna – Panel Admin</title>
+<link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,600;1,400&family=DM+Sans:wght@300;400;500;600&display=swap" rel="stylesheet"/>
+
+<!-- Firebase SDK -->
+<script type="module">
+  import { initializeApp }          from "https://www.gstatic.com/firebasejs/10.12.0/firebase-app.js";
+  import { getAuth, signInWithEmailAndPassword, signOut, onAuthStateChanged }
+                                     from "https://www.gstatic.com/firebasejs/10.12.0/firebase-auth.js";
+  import { getFirestore, collection, addDoc, getDocs, doc, updateDoc, deleteDoc, orderBy, query }
+                                     from "https://www.gstatic.com/firebasejs/10.12.0/firebase-firestore.js";
+
+
+  // ── 🔥 TU CONFIGURACIÓN DE FIREBASE ──
+ const firebaseConfig = {
+  apiKey: "AIzaSyCEsku096KN85GVZ4MTRhmi0bZZtgHZGgE",
+  authDomain: "dulce-luna-29c8f.firebaseapp.com",
+  projectId: "dulce-luna-29c8f",
+  storageBucket: "dulce-luna-29c8f.firebasestorage.app",
+  messagingSenderId: "327264635410",
+  appId: "1:327264635410:web:868fcc29b47bc3f0f826cb"
+};
+
+  const app     = initializeApp(firebaseConfig);
+  const auth    = getAuth(app);
+  const db      = getFirestore(app);
+
+
+  let editingId   = null;
+  let allProducts = [];
+
+  // ── AUTH ──
+  onAuthStateChanged(auth, user => {
+    if (user) {
+      document.getElementById('login-screen').style.display  = 'none';
+      document.getElementById('admin-screen').style.display  = 'block';
+      document.getElementById('admin-email').textContent = user.email;
+      loadProducts();
+    } else {
+      document.getElementById('login-screen').style.display  = 'flex';
+      document.getElementById('admin-screen').style.display  = 'none';
+    }
+  });
+
+  window.loginAdmin = async () => {
+    const email = document.getElementById('login-email').value.trim();
+    const pass  = document.getElementById('login-pass').value.trim();
+    const btn   = document.getElementById('login-btn');
+    const err   = document.getElementById('login-error');
+    if (!email || !pass) { err.textContent = 'Completa todos los campos.'; return; }
+    btn.disabled = true; btn.textContent = 'Ingresando...';
+    try {
+      await signInWithEmailAndPassword(auth, email, pass);
+   } catch(e) {
+  console.error(e);
+  err.textContent = e.message;
+  btn.disabled = false;
+  btn.textContent = "Ingresar";
+}
+  };
+
+  window.logoutAdmin = async () => {
+    await signOut(auth);
+  };
+
+  // ── LOAD ──
+  async function loadProducts() {
+    const snap = await getDocs(query(collection(db, "productos"), orderBy("orden","asc")));
+    allProducts = snap.docs.map(d => ({ id: d.id, ...d.data() }));
+    renderList(allProducts);
+  }
+
+  function renderList(products) {
+    const tbody = document.getElementById('products-tbody');
+    const empty = document.getElementById('table-empty');
+    if (products.length === 0) {
+      tbody.innerHTML = '';
+      empty.style.display = 'table-row';
+      return;
+    }
+    empty.style.display = 'none';
+    tbody.innerHTML = products.map(p => `
+      <tr class="${!p.activo ? 'inactive-row' : ''}">
+        <td>
+          <div class="td-img-wrap">
+            ${p.imagenURL ? `<img src="${p.imagenURL}" alt="${p.nombre}"/>` : `<span class="td-emoji">${p.emoji || '🍰'}</span>`}
+          </div>
+        </td>
+        <td>
+          <div class="td-name">${p.nombre}</div>
+          <div class="td-desc">${(p.descripcion||'').substring(0,50)}${p.descripcion?.length > 50 ? '…' : ''}</div>
+        </td>
+        <td><span class="cat-pill cat-${p.categoria}">${catLabel(p.categoria)}</span></td>
+        <td class="td-price">S/. ${p.precio}</td>
+        <td>
+          <label class="toggle-switch">
+            <input type="checkbox" ${p.activo !== false ? 'checked' : ''}
+              onchange="toggleActive('${p.id}', this.checked)"/>
+            <span class="toggle-slider"></span>
+          </label>
+        </td>
+        <td>
+          <div class="td-actions">
+            <button class="btn-edit" onclick="openEdit('${p.id}')">✏️ Editar</button>
+            <button class="btn-del"  onclick="deleteProduct('${p.id}')">🗑</button>
+          </div>
+        </td>
+      </tr>`).join('');
+  }
+
+  // ── FILTER ──
+  window.filterTable = (cat, btn) => {
+  document.querySelectorAll('.filter-tab')
+    .forEach(t => t.classList.remove('active'));
+
+  btn.classList.add('active');
+
+  renderList(
+    cat === 'all'
+      ? allProducts
+      : allProducts.filter(p => p.categoria === cat)
+  );
+};
+
+  // ── FORM ──
+ window.openAdd = () => {
+  editingId = null;
+
+  document.getElementById('modal-title').textContent = 'Agregar Producto';
+
+  const form = document.getElementById('product-form');
+  if(form) form.reset();
+
+  document.getElementById('f-categoria').value = 'alfajores';
+  document.getElementById('f-activo').checked = true;
+  document.getElementById('f-imagenURL').value = '';
+
+  previewImageURL('');
+
+  openModal();
+};
+
+  window.openEdit = (id) => {
+    editingId = id;
+    const p = allProducts.find(x => x.id === id);
+    if (!p) return;
+    document.getElementById('modal-title').textContent = 'Editar Producto';
+    document.getElementById('f-nombre').value       = p.nombre || '';
+    document.getElementById('f-categoria').value    = p.categoria || 'alfajores';
+    document.getElementById('f-precio').value       = p.precio || '';
+    document.getElementById('f-precioOriginal').value= p.precioOriginal || '';
+    document.getElementById('f-emoji').value        = p.emoji || '';
+    document.getElementById('f-descripcion').value  = p.descripcion || '';
+    document.getElementById('f-badge').value        = p.badge || '';
+    document.getElementById('f-orden').value        = p.orden || 1;
+    document.getElementById('f-activo').checked     = p.activo !== false;
+
+    document.getElementById('f-imagenURL').value    = p.imagenURL || '';
+    openModal();
+  };
+
+  window.closeModal = () => {
+    document.getElementById('product-modal').classList.remove('open');
+  };
+  function openModal() {
+    document.getElementById('product-modal').classList.add('open');
+  }
+
+  window.previewImageURL = (url) => {
+    const preview = document.getElementById('img-preview');
+    if (url) {
+      preview.src = url;
+      preview.style.display = 'block';
+      preview.onerror = () => { preview.style.display = 'none'; };
+    } else {
+      preview.style.display = 'none';
+    }
+  };
+
+  window.saveProduct = async () => {
+    const nombre      = document.getElementById('f-nombre').value.trim();
+    const categoria   = document.getElementById('f-categoria').value;
+    const precio      = parseFloat(document.getElementById('f-precio').value);
+    const precioOrig  = parseFloat(document.getElementById('f-precioOriginal').value) || null;
+    const emoji       = document.getElementById('f-emoji').value.trim();
+    const descripcion = document.getElementById('f-descripcion').value.trim();
+    const badge       = document.getElementById('f-badge').value;
+    const orden       = parseInt(document.getElementById('f-orden').value) || 99;
+    const activo      = document.getElementById('f-activo').checked;
+    const imagenURL = document.getElementById('f-imagenURL').value.trim();
+
+    if (!nombre || !categoria || isNaN(precio)) {
+      showToast('⚠️ Completa los campos obligatorios (nombre, categoría, precio)', 'error');
+      return;
+    }
+
+    const saveBtn = document.getElementById('save-btn');
+    saveBtn.disabled = true; saveBtn.textContent = 'Guardando...';
+
+    try {
+      const data = { nombre, categoria, precio, descripcion, emoji, badge, orden, activo };
+      if (precioOrig) data.precioOriginal = precioOrig;
+      if (imagenURL)  data.imagenURL = imagenURL;
+
+      if (editingId) {
+        await updateDoc(doc(db, "productos", editingId), data);
+        showToast('✅ Producto actualizado');
+      } else {
+        await addDoc(collection(db, "productos"), data);
+        showToast('✅ Producto agregado');
+      }
+
+      closeModal();
+      await loadProducts();
+    } catch(e) {
+      console.error(e);
+      showToast('❌ Error al guardar: ' + e.message, 'error');
+    }
+
+    saveBtn.disabled = false; saveBtn.textContent = '💾 Guardar producto';
+  };
+
+  window.toggleActive = async (id, active) => {
+    await updateDoc(doc(db, "productos", id), { activo: active });
+    const p = allProducts.find(x => x.id === id);
+    if (p) p.activo = active;
+    showToast(active ? '✅ Producto activado' : '⚠️ Producto ocultado');
+  };
+
+  window.deleteProduct = async (id) => {
+    if (!confirm('¿Eliminar este producto? Esta acción no se puede deshacer.')) return;
+    await deleteDoc(doc(db, "productos", id));
+    showToast('🗑 Producto eliminado');
+    await loadProducts();
+  };
+
+  function catLabel(c) {
+    return { alfajores:'Alfajores', tortas:'Tortas', bocaditos:'Bocaditos', sanguches:'Sanguches' }[c] || c;
+  }
+
+  function showToast(msg, type) {
+    const t = document.getElementById('admin-toast');
+    t.textContent = msg;
+    t.className = 'admin-toast show' + (type === 'error' ? ' error' : '');
+    setTimeout(() => t.classList.remove('show'), 2800);
+  }
+
+  // Botón login y tecla Enter — dentro del módulo para acceder a loginAdmin
+  document.addEventListener('DOMContentLoaded', () => {
+    document.getElementById('login-btn').addEventListener('click', loginAdmin);
+    document.getElementById('login-pass').addEventListener('keydown', e => {
+      if (e.key === 'Enter') loginAdmin();
+    });
+    document.getElementById('login-email').addEventListener('keydown', e => {
+      if (e.key === 'Enter') loginAdmin();
+    });
+  });
+</script>
+
+<style>
+:root{
+  --cream:#fdf6f0;--blush:#f5d5cb;--rose:#e8a598;--dusty:#c9796a;
+  --brown:#7a4535;--mocha:#4a2318;--white:#ffffff;--soft:#fbebea;
+  --gold:#c9a87c;--gray:#8b5e52;
+  --danger:#e05252;--success:#52a87e
+}
+*,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+html{scroll-behavior:smooth;-webkit-tap-highlight-color:transparent}
+body{font-family:'DM Sans',sans-serif;background:#f7f0eb;color:var(--mocha);min-height:100vh}
+
+/* ── LOGIN ── */
+#login-screen{
+  display:flex;align-items:center;justify-content:center;
+  min-height:100vh;padding:20px;
+  background:linear-gradient(145deg,var(--blush),var(--soft))
+}
+.login-card{
+  background:var(--white);border-radius:28px;padding:44px 36px;
+  width:100%;max-width:400px;
+  box-shadow:0 16px 60px rgba(122,69,53,.18)
+}
+.login-logo{
+  text-align:center;margin-bottom:28px
+}
+.login-logo h1{
+  font-family:'Playfair Display',serif;font-size:2rem;font-style:italic;
+  color:var(--brown)
+}
+.login-logo p{font-size:.8rem;color:var(--gray);margin-top:4px}
+.login-field{margin-bottom:16px}
+.login-field label{font-size:.75rem;font-weight:500;text-transform:uppercase;letter-spacing:.1em;color:var(--brown);display:block;margin-bottom:6px}
+.login-field input{
+  width:100%;border:1.5px solid var(--blush);border-radius:13px;
+  padding:12px 16px;font-size:.93rem;font-family:'DM Sans',sans-serif;
+  color:var(--mocha);background:var(--cream);outline:none;
+  transition:border-color .25s
+}
+.login-field input:focus{border-color:var(--rose)}
+.login-error{color:var(--danger);font-size:.82rem;margin-bottom:12px;min-height:18px}
+.login-btn{
+  width:100%;padding:14px;background:linear-gradient(135deg,var(--dusty),var(--brown));
+  color:var(--white);border:none;border-radius:13px;
+  font-size:.95rem;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;
+  transition:all .25s
+}
+.login-btn:hover{transform:translateY(-1px);box-shadow:0 8px 24px rgba(122,69,53,.25)}
+.login-btn:disabled{opacity:.6;transform:none}
+
+/* ── ADMIN SCREEN ── */
+#admin-screen{ display:none }
+
+.admin-nav{
+  background:var(--white);border-bottom:1px solid var(--blush);
+  padding:0 20px;height:60px;
+  display:flex;align-items:center;justify-content:space-between;
+  position:sticky;top:0;z-index:100;
+  box-shadow:0 2px 12px rgba(122,69,53,.06)
+}
+.admin-nav-logo{
+  font-family:'Playfair Display',serif;font-size:1.2rem;font-style:italic;
+  color:var(--brown);display:flex;align-items:center;gap:7px
+}
+.admin-nav-right{display:flex;align-items:center;gap:10px}
+#admin-email{font-size:.78rem;color:var(--gray)}
+.btn-logout{
+  background:var(--soft);color:var(--dusty);border:none;border-radius:50px;
+  padding:7px 14px;font-size:.78rem;font-weight:500;cursor:pointer;transition:all .2s
+}
+.btn-logout:hover{background:var(--dusty);color:var(--white)}
+.btn-store{
+  text-decoration:none;background:var(--cream);color:var(--brown);border:1.5px solid var(--blush);
+  border-radius:50px;padding:7px 14px;font-size:.78rem;font-weight:500;transition:all .2s
+}
+.btn-store:hover{border-color:var(--rose)}
+
+.admin-body{padding:24px 20px;max-width:1100px;margin:0 auto}
+
+.admin-header{
+  display:flex;align-items:center;justify-content:space-between;
+  margin-bottom:24px;flex-wrap:wrap;gap:12px
+}
+.admin-header h2{
+  font-family:'Playfair Display',serif;font-size:1.5rem;color:var(--brown)
+}
+.btn-add{
+  background:linear-gradient(135deg,var(--dusty),var(--brown));
+  color:var(--white);border:none;border-radius:50px;
+  padding:11px 24px;font-size:.88rem;font-weight:600;
+  cursor:pointer;transition:all .25s;display:flex;align-items:center;gap:7px
+}
+.btn-add:hover{transform:translateY(-1px);box-shadow:0 6px 20px rgba(122,69,53,.25)}
+
+/* FILTER TABS */
+.filter-tabs{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:20px}
+.filter-tab{
+  padding:7px 16px;border-radius:50px;
+  border:1.5px solid var(--blush);background:var(--white);
+  font-size:.78rem;font-weight:500;cursor:pointer;color:var(--brown);transition:all .2s
+}
+.filter-tab.active{background:var(--dusty);color:var(--white);border-color:var(--dusty)}
+
+/* TABLE */
+.table-wrap{
+  background:var(--white);border-radius:20px;
+  box-shadow:0 4px 24px rgba(122,69,53,.07);overflow:hidden;
+  overflow-x:auto;-webkit-overflow-scrolling:touch
+}
+table{width:100%;border-collapse:collapse;min-width:600px}
+thead{background:var(--soft)}
+th{
+  padding:12px 16px;text-align:left;
+  font-size:.72rem;font-weight:600;letter-spacing:.1em;
+  text-transform:uppercase;color:var(--brown)
+}
+tbody tr{border-bottom:1px solid var(--blush);transition:background .15s}
+tbody tr:last-child{border:none}
+tbody tr:hover{background:var(--cream)}
+tbody tr.inactive-row{opacity:.55}
+td{padding:12px 16px;font-size:.88rem;color:var(--mocha);vertical-align:middle}
+
+.td-img-wrap{width:52px;height:52px;border-radius:12px;overflow:hidden;background:var(--soft);display:flex;align-items:center;justify-content:center;flex-shrink:0}
+.td-img-wrap img{width:100%;height:100%;object-fit:cover}
+.td-emoji{font-size:1.6rem}
+.td-name{font-weight:500;color:var(--brown);margin-bottom:2px}
+.td-desc{font-size:.75rem;color:var(--gray)}
+.td-price{font-family:'Playfair Display',serif;font-size:1rem;color:var(--dusty);font-weight:600}
+.td-actions{display:flex;gap:8px;align-items:center}
+
+.cat-pill{
+  display:inline-block;padding:3px 10px;border-radius:50px;
+  font-size:.68rem;font-weight:600;letter-spacing:.06em;text-transform:uppercase
+}
+.cat-alfajores{background:#fff0ea;color:#c9796a}
+.cat-tortas{background:#fce8f0;color:#b5506e}
+.cat-bocaditos{background:#e8f0fa;color:#4a72b5}
+.cat-sanguches{background:#eaf5e8;color:#4a8052}
+
+.btn-edit{
+  background:var(--soft);color:var(--dusty);border:none;border-radius:8px;
+  padding:6px 12px;font-size:.78rem;cursor:pointer;transition:all .2s
+}
+.btn-edit:hover{background:var(--dusty);color:var(--white)}
+.btn-del{
+  width:32px;height:32px;border-radius:8px;border:none;
+  background:#fbe8e8;color:var(--danger);cursor:pointer;
+  font-size:.9rem;transition:all .2s;display:flex;align-items:center;justify-content:center
+}
+.btn-del:hover{background:var(--danger);color:var(--white)}
+
+/* TOGGLE SWITCH */
+.toggle-switch{position:relative;display:inline-flex;align-items:center;cursor:pointer}
+.toggle-switch input{opacity:0;width:0;height:0;position:absolute}
+.toggle-slider{
+  width:42px;height:24px;background:#ddd;border-radius:50px;
+  transition:.3s;position:relative
+}
+.toggle-slider::after{
+  content:'';position:absolute;top:3px;left:3px;
+  width:18px;height:18px;border-radius:50%;
+  background:var(--white);transition:.3s
+}
+input:checked + .toggle-slider{background:var(--success)}
+input:checked + .toggle-slider::after{transform:translateX(18px)}
+
+#table-empty td{text-align:center;padding:50px;color:var(--gray);font-size:.9rem}
+
+/* ── MODAL ── */
+.modal-overlay{
+  position:fixed;inset:0;background:rgba(74,35,24,.5);
+  z-index:200;opacity:0;pointer-events:none;transition:opacity .3s;
+  backdrop-filter:blur(4px);display:flex;align-items:flex-end;justify-content:center;
+}
+.modal-overlay.open{opacity:1;pointer-events:all}
+.modal{
+  background:var(--white);border-radius:24px 24px 0 0;
+  width:100%;max-width:600px;
+  transform:translateY(100%);transition:transform .4s cubic-bezier(.4,0,.2,1);
+  max-height:90vh;overflow-y:auto;-webkit-overflow-scrolling:touch
+}
+.modal-overlay.open .modal{transform:translateY(0)}
+@media(min-width:640px){
+  .modal-overlay{align-items:center}
+  .modal{border-radius:24px;max-height:85vh}
+}
+.modal-head{
+  padding:22px 24px;border-bottom:1px solid var(--blush);
+  display:flex;align-items:center;justify-content:space-between;
+  position:sticky;top:0;background:var(--white);z-index:1
+}
+.modal-head h3{font-family:'Playfair Display',serif;font-size:1.2rem;color:var(--brown)}
+.modal-close{
+  width:34px;height:34px;border-radius:50%;border:none;
+  background:var(--soft);cursor:pointer;color:var(--dusty);font-size:1rem;
+  display:flex;align-items:center;justify-content:center
+}
+.modal-body{padding:24px}
+
+.f-group{margin-bottom:16px}
+.f-label{font-size:.72rem;font-weight:600;text-transform:uppercase;letter-spacing:.1em;color:var(--brown);display:block;margin-bottom:6px}
+.f-required{color:var(--dusty)}
+.f-row{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+.f-input,.f-select,.f-textarea{
+  width:100%;border:1.5px solid var(--blush);border-radius:12px;
+  padding:11px 14px;font-size:.9rem;font-family:'DM Sans',sans-serif;
+  color:var(--mocha);background:var(--cream);outline:none;
+  transition:border-color .25s,box-shadow .25s
+}
+.f-input:focus,.f-select:focus,.f-textarea:focus{
+  border-color:var(--rose);box-shadow:0 0 0 3px rgba(232,165,152,.18)
+}
+.f-textarea{min-height:80px;resize:vertical}
+.f-select{cursor:pointer}
+
+/* Image upload */
+.img-upload-area{
+  border:2px dashed var(--blush);border-radius:14px;
+  padding:24px;text-align:center;cursor:pointer;
+  transition:all .25s;position:relative;margin-top:4px
+}
+.img-upload-area:hover{border-color:var(--rose);background:var(--soft)}
+.img-upload-area input{position:absolute;inset:0;opacity:0;cursor:pointer;width:100%;height:100%}
+.img-upload-area p{font-size:.82rem;color:var(--gray)}
+.img-upload-area strong{color:var(--dusty)}
+#img-preview{
+  display:none;width:100%;max-height:160px;object-fit:contain;
+  border-radius:10px;margin-top:10px
+}
+.current-img-wrap{
+  margin-bottom:8px;display:none
+}
+.current-img-wrap p{font-size:.72rem;color:var(--gray);margin-bottom:6px}
+.current-img-wrap img{
+  width:80px;height:80px;object-fit:cover;border-radius:10px;
+  border:2px solid var(--blush)
+}
+
+.toggle-row{display:flex;align-items:center;gap:12px;margin-top:4px}
+.toggle-row span{font-size:.88rem;color:var(--gray)}
+
+.modal-foot{
+  padding:16px 24px 24px;border-top:1px solid var(--blush);
+  position:sticky;bottom:0;background:var(--white);
+  display:flex;gap:12px;flex-wrap:wrap
+}
+.btn-save{
+  flex:1;padding:13px;background:linear-gradient(135deg,var(--dusty),var(--brown));
+  color:var(--white);border:none;border-radius:13px;
+  font-size:.92rem;font-weight:600;cursor:pointer;font-family:'DM Sans',sans-serif;
+  transition:all .25s;min-width:160px
+}
+.btn-save:hover{transform:translateY(-1px)}
+.btn-save:disabled{opacity:.6;transform:none}
+.btn-cancel{
+  padding:13px 20px;background:var(--soft);color:var(--brown);
+  border:none;border-radius:13px;font-size:.92rem;font-weight:500;
+  cursor:pointer;font-family:'DM Sans',sans-serif;transition:all .25s
+}
+.btn-cancel:hover{background:var(--blush)}
+
+/* TOAST */
+.admin-toast{
+  position:fixed;bottom:20px;left:50%;
+  transform:translateX(-50%) translateY(60px);
+  background:var(--brown);color:var(--white);
+  padding:12px 24px;border-radius:50px;
+  font-size:.85rem;z-index:400;opacity:0;
+  transition:all .4s cubic-bezier(.34,1.56,.64,1);white-space:nowrap
+}
+.admin-toast.show{transform:translateX(-50%) translateY(0);opacity:1}
+.admin-toast.error{background:var(--danger)}
+
+/* HINT BOX */
+.hint-box{
+  background:linear-gradient(135deg,rgba(201,121,106,.08),rgba(122,69,53,.06));
+  border:1.5px dashed var(--blush);border-radius:16px;padding:20px 24px;
+  margin-bottom:24px;font-size:.85rem;color:var(--gray);line-height:1.7
+}
+.hint-box strong{color:var(--brown);display:block;margin-bottom:4px}
+.hint-box code{
+  background:var(--soft);color:var(--dusty);padding:2px 7px;
+  border-radius:5px;font-family:monospace;font-size:.82rem
+}
+</style>
+</head>
+<body>
+
+<!-- ══ LOGIN ══ -->
+<div id="login-screen">
+  <div class="login-card">
+    <div class="login-logo">
+      <h1>🌙 Dulce Luna</h1>
+      <p>Panel de Administración</p>
+    </div>
+    <div class="login-field">
+      <label>Correo electrónico</label>
+      <input type="email" id="login-email" placeholder="admin@dulceluna.com"/>
+    </div>
+    <div class="login-field">
+      <label>Contraseña</label>
+      <input type="password" id="login-pass" placeholder="••••••••"/>
+    </div>
+    <div class="login-error" id="login-error"></div>
+    <button class="login-btn" id="login-btn">Ingresar</button>
+  </div>
+</div>
+
+<!-- ══ ADMIN ══ -->
+<div id="admin-screen">
+
+  <nav class="admin-nav">
+    <div class="admin-nav-logo">🌙 Admin</div>
+    <div class="admin-nav-right">
+      <span id="admin-email"></span>
+      <a href="index.html" class="btn-store" target="_blank">🛍 Ver tienda</a>
+      <button class="btn-logout" onclick="logoutAdmin()">Salir</button>
+    </div>
+  </nav>
+
+  <div class="admin-body">
+
+    <!-- HINT -->
+    <div class="hint-box">
+      <strong>📋 Guía rápida</strong>
+      Agrega productos con el botón <b>+ Agregar Producto</b>. Activa o desactiva productos sin eliminarlos con el toggle. Para las imágenes, sube tu foto a <b>Imgur.com</b> (gratis, sin registro) y pega el link directo.<br/>
+      <b>Estructura en Firestore:</b> colección <code>productos</code> · campos: <code>nombre</code>, <code>categoria</code>, <code>precio</code>, <code>descripcion</code>, <code>emoji</code>, <code>imagenURL</code>, <code>activo</code>, <code>orden</code>
+    </div>
+
+    <div class="admin-header">
+      <div>
+        <h2>📦 Productos</h2>
+      </div>
+      <button class="btn-add" onclick="openAdd()">+ Agregar Producto</button>
+    </div>
+
+    <div class="filter-tabs">
+     <button class="filter-tab active" onclick="filterTable('all', this)">🌸 Todos</button>
+      <button class="filter-tab" onclick="filterTable('alfajores',this)">🍪 Alfajores</button>
+      <button class="filter-tab" onclick="filterTable('tortas',this)">🎂 Tortas</button>
+      <button class="filter-tab" onclick="filterTable('bocaditos',this)">🧁 Bocaditos</button>
+      <<button class="filter-tab" onclick="filterTable('sanguches', this)">🥪 Sanguches</button>
+    </div>
+
+    <div class="table-wrap">
+      <table>
+        <thead>
+          <tr>
+            <th>Imagen</th>
+            <th>Producto</th>
+            <th>Categoría</th>
+            <th>Precio</th>
+            <th>Activo</th>
+            <th>Acciones</th>
+          </tr>
+        </thead>
+        <tbody id="products-tbody"></tbody>
+        <tbody>
+          <tr id="table-empty" style="display:none">
+            <td colspan="6">No hay productos aún. ¡Agrega el primero!</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+
+  </div>
+</div>
+
+<!-- ══ MODAL ══ -->
+<div class="modal-overlay" id="product-modal">
+  <div class="modal">
+    <div class="modal-head">
+      <h3 id="modal-title">Agregar Producto</h3>
+      <button class="modal-close" onclick="closeModal()">✕</button>
+    </div>
+    <form id="product-form" class="modal-body">
+
+      <div class="f-row">
+        <div class="f-group">
+          <label class="f-label">Nombre <span class="f-required">*</span></label>
+          <input class="f-input" type="text" id="f-nombre" placeholder="Pack 6 Alfajores"/>
+        </div>
+        <div class="f-group">
+          <label class="f-label">Categoría <span class="f-required">*</span></label>
+          <select class="f-select" id="f-categoria">
+            <option value="alfajores">🍪 Alfajores</option>
+            <option value="tortas">🎂 Tortas</option>
+            <option value="bocaditos">🧁 Bocaditos</option>
+            <option value="sanguches">🥪 Sanguches</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="f-row">
+        <div class="f-group">
+          <label class="f-label">Precio (S/.) <span class="f-required">*</span></label>
+          <input class="f-input" type="number" id="f-precio" placeholder="25" min="0" step="0.5"/>
+        </div>
+        <div class="f-group">
+          <label class="f-label">Precio original (tachado)</label>
+          <input class="f-input" type="number" id="f-precioOriginal" placeholder="35" min="0" step="0.5"/>
+        </div>
+      </div>
+
+      <div class="f-row">
+        <div class="f-group">
+          <label class="f-label">Emoji (si no hay foto)</label>
+          <input class="f-input" type="text" id="f-emoji" placeholder="🍪" maxlength="4"/>
+        </div>
+        <div class="f-group">
+          <label class="f-label">Badge</label>
+          <select class="f-select" id="f-badge">
+            <option value="">Sin badge</option>
+            <option value="Popular">🔥 Popular</option>
+            <option value="Nuevo">✨ Nuevo</option>
+          </select>
+        </div>
+      </div>
+
+      <div class="f-group">
+        <label class="f-label">Descripción</label>
+        <textarea class="f-textarea" id="f-descripcion" placeholder="Describe brevemente el producto..."></textarea>
+      </div>
+
+      <div class="f-group">
+        <label class="f-label">Link de imagen (URL)</label>
+        <input class="f-input" type="url" id="f-imagenURL" placeholder="https://i.imgur.com/ejemplo.jpg"
+          oninput="previewImageURL(this.value)"/>
+        <p style="font-size:.72rem;color:var(--gray);margin-top:5px">
+          💡 Sube tu foto a <a href="https://imgur.com/upload" target="_blank" style="color:var(--dusty)">Imgur</a>, 
+          <a href="https://cloudinary.com" target="_blank" style="color:var(--dusty)">Cloudinary</a> o Google Drive y pega el link directo aquí.
+        </p>
+        <img id="img-preview" src="" alt="Vista previa" style="display:none;width:100%;max-height:160px;object-fit:contain;border-radius:10px;margin-top:10px;border:1.5px solid var(--blush)"/>
+      </div>
+
+      <div class="f-row">
+        <div class="f-group">
+          <label class="f-label">Orden (menor = primero)</label>
+          <input class="f-input" type="number" id="f-orden" placeholder="1" min="1"/>
+        </div>
+        <div class="f-group">
+          <label class="f-label">Estado</label>
+          <div class="toggle-row">
+            <label class="toggle-switch">
+              <input type="checkbox" id="f-activo" checked/>
+              <span class="toggle-slider"></span>
+            </label>
+            <span>Visible en tienda</span>
+          </div>
+        </div>
+      </div>
+</form>
+<div class="modal-foot">
+      <button class="btn-cancel" onclick="closeModal()">Cancelar</button>
+      <button class="btn-save" id="save-btn" onclick="saveProduct()">💾 Guardar producto</button>
+    </div>
+  </div>
+</div>
+
+<div class="admin-toast" id="admin-toast"></div>
+
+</body>
+</html>

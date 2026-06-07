@@ -46,22 +46,19 @@
     }
   });
 
-  window.loginAdmin = async () => {
-    const email = document.getElementById('login-email').value.trim();
-    const pass  = document.getElementById('login-pass').value.trim();
-    const btn   = document.getElementById('login-btn');
-    const err   = document.getElementById('login-error');
-    if (!email || !pass) { err.textContent = 'Completa todos los campos.'; return; }
-    btn.disabled = true; btn.textContent = 'Ingresando...';
-    try {
-      await signInWithEmailAndPassword(auth, email, pass);
-   } catch(e) {
-  console.error(e);
-  err.textContent = e.message;
-  btn.disabled = false;
-  btn.textContent = "Ingresar";
-}
-  };
+window.loginAdmin = async () => {
+  const email = document.getElementById('login-email').value.trim();
+  const pass = document.getElementById('login-pass').value.trim();
+
+  console.log("Intentando login con:", email);
+
+  try {
+    const result = await signInWithEmailAndPassword(auth, email, pass);
+    console.log("LOGIN EXITOSO", result.user);
+  } catch (e) {
+    console.error("ERROR FIREBASE:", e.code, e.message);
+  }
+};
 
   window.logoutAdmin = async () => {
     await signOut(auth);

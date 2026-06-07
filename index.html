@@ -48,15 +48,38 @@
 
 window.loginAdmin = async () => {
   const email = document.getElementById('login-email').value.trim();
-  const pass = document.getElementById('login-pass').value.trim();
+  const pass  = document.getElementById('login-pass').value.trim();
+  const btn   = document.getElementById('login-btn');
+  const err   = document.getElementById('login-error');
 
-  console.log("Intentando login con:", email);
+  err.textContent = "";
+
+  if (!email || !pass) {
+    err.textContent = "Completa todos los campos.";
+    return;
+  }
+
+  btn.disabled = true;
+  btn.textContent = "Ingresando...";
 
   try {
-    const result = await signInWithEmailAndPassword(auth, email, pass);
-    console.log("LOGIN EXITOSO", result.user);
-  } catch (e) {
-    console.error("ERROR FIREBASE:", e.code, e.message);
+    await signInWithEmailAndPassword(auth, email, pass);
+
+  } catch(e) {
+    console.error(e);
+
+    if (
+      e.code === "auth/invalid-credential" ||
+      e.code === "auth/user-not-found" ||
+      e.code === "auth/wrong-password"
+    ) {
+      err.textContent = "❌ Correo o contraseña incorrectos";
+    } else {
+      err.textContent = "❌ Error: " + e.message;
+    }
+
+    btn.disabled = false;
+    btn.textContent = "Ingresar";
   }
 };
 
